@@ -2,8 +2,7 @@
 import paramiko
 import argparse
 
-
-# Создание SSH клиента
+# Создаём SSH клиент
 def connect_ssh(host, username, key_file):
     ssh_client = paramiko.SSHClient()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -14,7 +13,8 @@ def connect_ssh(host, username, key_file):
 def ssh_command(ssh_client, command):
     stdin, stdout, stderr = ssh_client.exec_command(command)
     exit_status = stdout.channel.recv_exit_status()
-    if exit_status == 0:
+    error_status = stderr.channel.recv_stderr_ready()
+    if not error_status:
         return stdout.read().decode("utf-8")
     else:
         raise Exception(stderr.read().decode("utf-8"))
@@ -28,51 +28,56 @@ def test_connection(ssh_client):
 def setup_postgres(ssh_client):
     print("Установка PostgreSQL...")
     command = 'sudo apt update && sudo apt install -y postgresql postgresql-contrib'
-    stdin, stdout, stderr = ssh_client.exec_command(command, get_pty=True)
+    stdin, stdout, stderr = ssh_client.exec_command(command)
+    stdout.channel.set_combine_stderr(True)
     # читаем stdout и выводим в консоль
-    while not stdout.channel.exit_status_ready():
+    while True:
         line = stdout.readline()
         if not line:
             break
         print(line, end="")
 
+# Проверяем статус PostgreSQL
+def get_status(ssh_client):
+    print("Получение статуса PostgreSQL...")
+    status = ssh_command(ssh_client, 'systemctl status postgresql')
+    print(status)
+
 # Открываем для приема внешних соединений
-def setup_open(ssh_client):
+def set_open(ssh_client):
     output = ssh_command(ssh_client, 'psql --version')
     version_line = output.strip().split(' ')[2] 
-    version = version_line.split('.')[0] # получили номер версии чтобы поменять файлы настроек
+    version = version_line.split('.')[0] # получили номер версии чтобы поменять файлы настроек в нужной папке
     pg_config_path = f"/etc/postgresql/{version}/main"
     commands = [
         f"echo \"listen_addresses = '*'\" | sudo tee -a {pg_config_path}/postgresql.conf",
         f"echo \"host all all 0.0.0.0/0 md5\" | sudo tee -a {pg_config_path}/pg_hba.conf",
         "sudo systemctl restart postgresql"
     ]
+
     for command in commands:
+        print(f"Executing {command}...")
         ssh_command(ssh_client, command)
+        print("Done")
 
-# Функция для получения статуса PostgreSQL
-def get_status(ssh_client):
-    print("Получение статуса PostgreSQL...")
-    status = ssh_command(ssh_client, 'systemctl status postgresql')
-    print(status)
-
-# Функция для выполнения SQL-запроса на удаленном сервере
+# Выполняем "SELECT (1);" на хосте
 def send_select_1(ssh_client):
     command = 'sudo -u postgres psql -c "SELECT (1);"'
     output = ssh_command(ssh_client, command)
     print(output)
 
-# Подготовка аргументов командной строки
+# Парсим аргументы
 def parse_arguments():
-    parser = argparse.ArgumentParser(description='Устанавливаем PostgreSQL на удаленный хост.')
+    parser = argparse.ArgumentParser()
     parser.add_argument('host', help='IP адрес или имя хоста удаленного сервера')
     return parser.parse_args()
 
+# Список команд
 commands = {
     '1': test_connection,
     '2': setup_postgres,
     '3': get_status,
-    '4': setup_open,
+    '4': set_open,
     '5': send_select_1
 }
 
@@ -82,6 +87,7 @@ def print_commands():
         print(f"  {cmd} - Команда {commands[cmd].__name__}")
     print("  exit - Выход из программы")
 
+# main
 def main():
         
     USER = 'roma_sl'
