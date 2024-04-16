@@ -14,15 +14,15 @@ def ssh_command(ssh_client, command):
     stdin, stdout, stderr = ssh_client.exec_command(command)
     exit_status = stdout.channel.recv_exit_status()
     error_status = stderr.channel.recv_stderr_ready()
-    if not error_status:
+    if exit_status == 0:
         return stdout.read().decode("utf-8")
-    else:
+    if error_status:
         raise Exception(stderr.read().decode("utf-8"))
 
 # Отправка тестового запроса для проверки соединения, проверяем какая ОС стоит на сервере
 def test_connection(ssh_client):
-    stdin, stdout, stderr = ssh_client.exec_command("cat /etc/os-release") # подразумевается что стоит linux
-    print(stdout.read().decode("utf-8"))
+    out = ssh_command(ssh_client, "cat /etc/os-release") # подразумевается что стоит linux
+    print(out,'\n')
 
 # Устанавливаем PostgreSQL
 def setup_postgres(ssh_client):
@@ -31,17 +31,15 @@ def setup_postgres(ssh_client):
     stdin, stdout, stderr = ssh_client.exec_command(command)
     stdout.channel.set_combine_stderr(True)
     # читаем stdout и выводим в консоль
-    while True:
-        line = stdout.readline()
-        if not line:
-            break
-        print(line, end="")
-
+    for line in stdout:
+        print(line.strip())
+    print("Done\n")
+    
 # Проверяем статус PostgreSQL
 def get_status(ssh_client):
     print("Получение статуса PostgreSQL...")
     status = ssh_command(ssh_client, 'systemctl status postgresql')
-    print(status)
+    print(status,'\n')
 
 # Открываем для приема внешних соединений
 def set_open(ssh_client):
@@ -58,13 +56,13 @@ def set_open(ssh_client):
     for command in commands:
         print(f"Executing {command}...")
         ssh_command(ssh_client, command)
-        print("Done")
+        print("Done\n")
 
 # Выполняем "SELECT (1);" на хосте
 def send_select_1(ssh_client):
     command = 'sudo -u postgres psql -c "SELECT (1);"'
     output = ssh_command(ssh_client, command)
-    print(output)
+    print(output,'\n')
 
 # Парсим аргументы
 def parse_arguments():
